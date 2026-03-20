@@ -3,46 +3,50 @@
 namespace Database\Seeders;
 
 use App\Models\DiscountRule;
+use App\Models\RatePlan;
 use Illuminate\Database\Seeder;
 
 class DiscountRuleSeeder extends Seeder
 {
     public function run(): void
     {
-        $rules = [
-            [
-                'name' => 'Long Stay 3+ Nights',
-                'type' => 'long_stay',
-                'min_nights' => 3,
-                'within_days' => null,
-                'discount_percentage' => 10.00,
-                'priority' => 1,
-                'is_active' => true,
-            ],
-            [
-                'name' => 'Long Stay 6+ Nights',
-                'type' => 'long_stay',
-                'min_nights' => 6,
-                'within_days' => null,
-                'discount_percentage' => 20.00,
-                'priority' => 2,
-                'is_active' => true,
-            ],
-            [
-                'name' => 'Last Minute Deal',
-                'type' => 'last_minute',
-                'min_nights' => null,
-                'within_days' => 3,
-                'discount_percentage' => 5.00,
-                'priority' => 1,
-                'is_active' => true,
-            ],
+        // Deactivate all Round 1 global discount rules
+        DiscountRule::query()
+            ->whereNull('rate_plan_id')
+            ->update(['is_active' => false]);
+
+        $ratePlans = RatePlan::with('roomType')->get();
+
+        /** @var array<string, array{percentage: float}> */
+        $earlyBirdConfig = [
+            'standard_EP' => ['percentage' => 5.00],
+            'standard_CP' => ['percentage' => 10.00],
+            'deluxe_CP' => ['percentage' => 10.00],
+            'deluxe_MAP' => ['percentage' => 10.00],
         ];
 
-        foreach ($rules as $rule) {
+        foreach ($ratePlans as $ratePlan) {
+            $key = $ratePlan->roomType->slug.'_'.$ratePlan->code;
+            $config = $earlyBirdConfig[$key] ?? null;
+
+            if (! $config) {
+                continue;
+            }
+
+            $roomTypeName = $ratePlan->roomType->name;
+            $percentage = $config['percentage'];
+
             DiscountRule::updateOrCreate(
-                ['name' => $rule['name'], 'type' => $rule['type']],
-                $rule,
+                ['rate_plan_id' => $ratePlan->id, 'type' => 'early_bird'],
+                [
+                    'name' => "Early Bird {$percentage}% - {$ratePlan->code} ({$roomTypeName})",
+                    'min_nights' => null,
+                    'within_days' => null,
+                    'min_days_before' => 7,
+                    'discount_percentage' => $percentage,
+                    'priority' => 1,
+                    'is_active' => true,
+                ],
             );
         }
     }

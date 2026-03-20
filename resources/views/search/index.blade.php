@@ -27,7 +27,7 @@
                         <span class="px-3 py-2 text-sm font-medium" x-text="form.adults"></span>
                         <button type="button" @click="incrementAdults"
                             class="px-3 py-2 text-gray-500 hover:text-gray-700 disabled:opacity-30"
-                            :disabled="form.adults >= 3">+</button>
+                            :disabled="form.adults >= 4">+</button>
                     </div>
                 </div>
                 <button type="submit" :disabled="loading"
@@ -88,9 +88,6 @@
             <p class="text-gray-500 mt-1 text-sm">
                 <span x-text="results?.search_params?.nights"></span> nights &middot;
                 <span x-text="results?.search_params?.adults"></span> <span x-text="results?.search_params?.adults === 1 ? 'adult' : 'adults'"></span>
-                <template x-if="results?.discount?.applied">
-                    <span> &middot; <span class="text-green-600 font-medium" x-text="results.discount.name"></span></span>
-                </template>
             </p>
         </div>
 
@@ -99,7 +96,7 @@
             <template x-for="room in results?.room_types || []" :key="room.id">
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden relative">
                     {{-- Sold Out Overlay --}}
-                    <div x-show="!room.is_available"
+                    <div x-show="!room.is_available && room.unavailable_reason === 'Sold Out'"
                         class="absolute inset-0 bg-gray-100/80 z-10 flex items-center justify-center">
                         <span class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-bold uppercase tracking-wide">Sold Out</span>
                     </div>
@@ -122,6 +119,7 @@
                                 <div>
                                     <h3 class="text-lg font-semibold text-[#1e2a4a]" x-text="room.name"></h3>
                                     <p class="text-gray-500 text-sm mt-0.5" x-text="room.description"></p>
+                                    <p class="text-xs text-gray-400 mt-0.5">Max: <span x-text="room.max_adults"></span> adults</p>
                                 </div>
                                 <template x-if="room.is_available && room.available_rooms <= 2">
                                     <span class="text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-1 rounded-full whitespace-nowrap">
@@ -137,62 +135,46 @@
                                 </template>
                             </div>
 
-                            {{-- Pricing Rows (only if available) --}}
-                            <template x-if="room.is_available && room.pricing">
-                                <div class="space-y-3">
-                                    {{-- Room Only --}}
-                                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                        <div>
-                                            <span class="text-sm font-medium text-gray-700">Room Only</span>
-                                            <template x-if="room.pricing.room_only.discount_percentage > 0">
-                                                <span class="ml-2 text-xs font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
-                                                    -<span x-text="room.pricing.room_only.discount_percentage"></span>%
-                                                </span>
-                                            </template>
-                                        </div>
-                                        <div class="text-right">
-                                            <template x-if="room.pricing.room_only.discount_amount > 0">
-                                                <span class="text-sm text-gray-400 line-through mr-2">
-                                                    &#8377;<span x-text="formatCurrency(room.pricing.room_only.base_total)"></span>
-                                                </span>
-                                            </template>
-                                            <span class="text-lg font-bold text-[#1e2a4a]">
-                                                &#8377;<span x-text="formatCurrency(room.pricing.room_only.final_total)"></span>
-                                            </span>
-                                            <span class="text-xs text-gray-400 ml-1">per <span x-text="results.search_params.nights"></span> nights</span>
-                                            <button @click="selectRoom(room, 'room_only')"
-                                                class="ml-3 bg-[#1e2a4a] text-white px-4 py-1.5 rounded-lg text-xs font-medium hover:bg-[#2a3a5c] transition">
-                                                Select
-                                            </button>
-                                        </div>
-                                    </div>
+                            {{-- Occupancy Exceeded Message --}}
+                            <template x-if="!room.is_available && room.unavailable_reason && room.unavailable_reason !== 'Sold Out'">
+                                <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <p class="text-sm text-yellow-700" x-text="room.unavailable_reason"></p>
+                                </div>
+                            </template>
 
-                                    {{-- With Breakfast --}}
-                                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                        <div>
-                                            <span class="text-sm font-medium text-gray-700">With Breakfast</span>
-                                            <template x-if="room.pricing.with_breakfast.discount_percentage > 0">
-                                                <span class="ml-2 text-xs font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
-                                                    -<span x-text="room.pricing.with_breakfast.discount_percentage"></span>%
-                                                </span>
-                                            </template>
+                            {{-- Rate Plan Rows (only if available) --}}
+                            <template x-if="room.is_available && room.rate_plans.length > 0">
+                                <div class="space-y-3">
+                                    <template x-for="plan in room.rate_plans" :key="plan.id">
+                                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                            <div>
+                                                <span class="text-sm font-medium text-gray-700" x-text="plan.name"></span>
+                                                <span class="text-xs text-gray-400 ml-1">(<span x-text="plan.code"></span>)</span>
+                                                <template x-if="plan.discount.applied">
+                                                    <span class="ml-2 text-xs font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                                                        -<span x-text="plan.discount.percentage"></span>%
+                                                    </span>
+                                                </template>
+                                            </div>
+                                            <div class="text-right flex items-center gap-2">
+                                                <div>
+                                                    <template x-if="plan.discount.applied">
+                                                        <span class="text-sm text-gray-400 line-through mr-1">
+                                                            &#8377;<span x-text="formatCurrency(plan.base_total)"></span>
+                                                        </span>
+                                                    </template>
+                                                    <span class="text-lg font-bold text-[#1e2a4a]">
+                                                        &#8377;<span x-text="formatCurrency(plan.final_total)"></span>
+                                                    </span>
+                                                    <span class="text-xs text-gray-400 ml-1">/ <span x-text="results.search_params.nights"></span> nights</span>
+                                                </div>
+                                                <button @click="selectRoom(room, plan)"
+                                                    class="bg-[#1e2a4a] text-white px-4 py-1.5 rounded-lg text-xs font-medium hover:bg-[#2a3a5c] transition">
+                                                    Select
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div class="text-right">
-                                            <template x-if="room.pricing.with_breakfast.discount_amount > 0">
-                                                <span class="text-sm text-gray-400 line-through mr-2">
-                                                    &#8377;<span x-text="formatCurrency(room.pricing.with_breakfast.base_total)"></span>
-                                                </span>
-                                            </template>
-                                            <span class="text-lg font-bold text-[#1e2a4a]">
-                                                &#8377;<span x-text="formatCurrency(room.pricing.with_breakfast.final_total)"></span>
-                                            </span>
-                                            <span class="text-xs text-gray-400 ml-1">per <span x-text="results.search_params.nights"></span> nights</span>
-                                            <button @click="selectRoom(room, 'with_breakfast')"
-                                                class="ml-3 bg-[#1e2a4a] text-white px-4 py-1.5 rounded-lg text-xs font-medium hover:bg-[#2a3a5c] transition">
-                                                Select
-                                            </button>
-                                        </div>
-                                    </div>
+                                    </template>
 
                                     {{-- Nightly Breakdown Toggle --}}
                                     <div>
@@ -201,27 +183,30 @@
                                             <span x-text="room._showBreakdown ? 'Hide' : 'Show'"></span> nightly breakdown
                                         </button>
                                         <div x-show="room._showBreakdown" x-transition class="mt-2">
-                                            <table class="w-full text-xs">
-                                                <thead>
-                                                    <tr class="text-gray-400 border-b">
-                                                        <th class="text-left py-1 font-medium">Date</th>
-                                                        <th class="text-right py-1 font-medium">Room Rate</th>
-                                                        <th class="text-right py-1 font-medium">Breakfast</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <template x-for="night in room.nightly_breakdown" :key="night.date">
-                                                        <tr class="border-b border-gray-100">
-                                                            <td class="py-1.5">
-                                                                <span x-text="night.date"></span>
-                                                                <span class="text-gray-400 ml-1" x-text="night.day"></span>
-                                                            </td>
-                                                            <td class="text-right py-1.5">&#8377;<span x-text="formatCurrency(night.room_rate)"></span></td>
-                                                            <td class="text-right py-1.5">&#8377;<span x-text="formatCurrency(night.breakfast_total)"></span></td>
-                                                        </tr>
-                                                    </template>
-                                                </tbody>
-                                            </table>
+                                            <template x-for="plan in room.rate_plans" :key="'bd-' + plan.id">
+                                                <div class="mb-3">
+                                                    <p class="text-xs font-semibold text-gray-500 mb-1" x-text="plan.name + ' (' + plan.code + ')'"></p>
+                                                    <table class="w-full text-xs">
+                                                        <thead>
+                                                            <tr class="text-gray-400 border-b">
+                                                                <th class="text-left py-1 font-medium">Date</th>
+                                                                <th class="text-right py-1 font-medium">Price</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <template x-for="night in plan.nightly_breakdown" :key="night.date">
+                                                                <tr class="border-b border-gray-100">
+                                                                    <td class="py-1.5">
+                                                                        <span x-text="night.date"></span>
+                                                                        <span class="text-gray-400 ml-1" x-text="night.day"></span>
+                                                                    </td>
+                                                                    <td class="text-right py-1.5">&#8377;<span x-text="formatCurrency(night.price)"></span></td>
+                                                                </tr>
+                                                            </template>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </template>
                                         </div>
                                     </div>
                                 </div>
@@ -241,16 +226,16 @@
                 <p class="text-sm font-semibold text-[#1e2a4a]">Stay Summary</p>
                 <p class="text-xs text-gray-500">
                     <span x-text="selectedRoom?.name"></span> &middot;
-                    <span x-text="selectedPlan === 'room_only' ? 'Room Only' : 'With Breakfast'"></span> &middot;
+                    <span x-text="selectedPlan?.name"></span> (<span x-text="selectedPlan?.code"></span>) &middot;
                     <span x-text="form.check_in"></span> to <span x-text="form.check_out"></span> &middot;
                     <span x-text="form.adults"></span> <span x-text="form.adults === 1 ? 'adult' : 'adults'"></span>
-                    <template x-if="selectedPricing?.discount_amount > 0">
-                        <span class="text-green-600"> &middot; Save &#8377;<span x-text="formatCurrency(selectedPricing.discount_amount)"></span></span>
+                    <template x-if="selectedPlan?.discount?.applied">
+                        <span class="text-green-600"> &middot; &#8377;<span x-text="formatCurrency(selectedPlan.discount.amount)"></span> saved</span>
                     </template>
                 </p>
             </div>
             <div class="flex items-center gap-4">
-                <span class="text-xl font-bold text-[#1e2a4a]">&#8377;<span x-text="formatCurrency(selectedPricing?.final_total)"></span></span>
+                <span class="text-xl font-bold text-[#1e2a4a]">&#8377;<span x-text="formatCurrency(selectedPlan?.final_total)"></span></span>
                 <button disabled title="Booking flow coming soon"
                     class="bg-[#1e2a4a] text-white px-6 py-2 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed">
                     Book Now
@@ -276,7 +261,6 @@ function searchApp() {
         results: null,
         selectedRoom: null,
         selectedPlan: null,
-        selectedPricing: null,
 
         get minCheckOut() {
             if (!this.form.check_in) return this.today;
@@ -286,7 +270,7 @@ function searchApp() {
         },
 
         incrementAdults() {
-            if (this.form.adults < 3) this.form.adults++;
+            if (this.form.adults < 4) this.form.adults++;
         },
 
         decrementAdults() {
@@ -305,7 +289,6 @@ function searchApp() {
             this.validationErrors = null;
             this.selectedRoom = null;
             this.selectedPlan = null;
-            this.selectedPricing = null;
 
             try {
                 const response = await fetch('/api/search', {
@@ -350,7 +333,6 @@ function searchApp() {
         selectRoom(room, plan) {
             this.selectedRoom = room;
             this.selectedPlan = plan;
-            this.selectedPricing = room.pricing[plan];
         },
 
         formatCurrency(value) {

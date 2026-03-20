@@ -29,4 +29,14 @@ class RoomType extends Model
     {
         return $this->hasMany(DailyInventory::class);
     }
+
+    public function ratePlans(): HasMany
+    {
+        return $this->hasMany(RatePlan::class);
+    }
+
+    public function activeRatePlans(): HasMany
+    {
+        return $this->ratePlans()->where('is_active', true)->orderBy('sort_order');
+    }
 }

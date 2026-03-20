@@ -3,7 +3,7 @@
 @section('title', 'Inventory & Pricing — Zotel Demo Property')
 
 @section('content')
-<div x-data="inventoryApp()" x-init="fetchInventory()" x-cloak class="max-w-5xl mx-auto px-4 py-8">
+<div x-data="inventoryApp()" x-init="fetchInventory()" x-cloak class="max-w-6xl mx-auto px-4 py-8">
     {{-- Header --}}
     <div class="mb-6">
         <a href="{{ route('search') }}" class="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1 mb-2">
@@ -13,13 +13,24 @@
         <h1 class="text-2xl font-bold text-[#1e2a4a]">Inventory & Pricing</h1>
     </div>
 
-    {{-- Tab Switcher --}}
-    <div class="flex border-b border-gray-200 mb-6">
+    {{-- Room Type Tabs --}}
+    <div class="flex border-b border-gray-200 mb-4">
         <template x-for="rt in roomTypes" :key="rt.slug">
-            <button @click="activeTab = rt.slug"
+            <button @click="activeRoomTab = rt.slug; activePlanTab = rt.rate_plans?.[0]?.code || ''"
                 class="px-4 py-2 text-sm font-medium border-b-2 transition -mb-px"
-                :class="activeTab === rt.slug ? 'border-[#1e2a4a] text-[#1e2a4a]' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                :class="activeRoomTab === rt.slug ? 'border-[#1e2a4a] text-[#1e2a4a]' : 'border-transparent text-gray-500 hover:text-gray-700'">
                 <span x-text="rt.name"></span>
+            </button>
+        </template>
+    </div>
+
+    {{-- Rate Plan Sub-tabs --}}
+    <div class="flex gap-2 mb-6" x-show="activeRoomType?.rate_plans?.length > 0">
+        <template x-for="plan in activeRoomType?.rate_plans || []" :key="plan.code">
+            <button @click="activePlanTab = plan.code"
+                class="px-3 py-1.5 text-xs font-medium rounded-full transition"
+                :class="activePlanTab === plan.code ? 'bg-[#1e2a4a] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+                <span x-text="plan.name"></span> (<span x-text="plan.code"></span>)
             </button>
         </template>
     </div>
@@ -37,14 +48,15 @@
                     <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
                         <th class="text-left px-4 py-3 font-medium">Date</th>
                         <th class="text-center px-4 py-3 font-medium">Avail.</th>
-                        <th class="text-right px-4 py-3 font-medium">1 Person</th>
-                        <th class="text-right px-4 py-3 font-medium">2 Persons</th>
-                        <th class="text-right px-4 py-3 font-medium">3 Persons</th>
-                        <th class="text-right px-4 py-3 font-medium">Breakfast</th>
+                        <template x-for="i in occupancyColumns" :key="i">
+                            <th class="text-right px-4 py-3 font-medium">
+                                <span x-text="i"></span>P
+                            </th>
+                        </template>
                     </tr>
                 </thead>
                 <tbody>
-                    <template x-for="day in activeInventory" :key="day.date">
+                    <template x-for="day in activeDailyRates" :key="day.date">
                         <tr class="border-t border-gray-100 hover:bg-gray-50"
                             :class="day.available_rooms === 0 || day.is_blocked ? 'opacity-50' : ''">
                             <td class="px-4 py-2.5">
@@ -64,10 +76,16 @@
                                         x-text="day.available_rooms + '/' + day.total_rooms"></span>
                                 </template>
                             </td>
-                            <td class="text-right px-4 py-2.5">&#8377;<span x-text="day.price_1p.toLocaleString('en-IN')"></span></td>
-                            <td class="text-right px-4 py-2.5">&#8377;<span x-text="day.price_2p.toLocaleString('en-IN')"></span></td>
-                            <td class="text-right px-4 py-2.5">&#8377;<span x-text="day.price_3p.toLocaleString('en-IN')"></span></td>
-                            <td class="text-right px-4 py-2.5">&#8377;<span x-text="day.breakfast_price_pp.toLocaleString('en-IN')"></span> <span class="text-gray-400 text-xs">pp</span></td>
+                            <template x-for="i in occupancyColumns" :key="'p' + i">
+                                <td class="text-right px-4 py-2.5">
+                                    <template x-if="getOccupancyPrice(day, i) !== null">
+                                        <span>&#8377;<span x-text="getOccupancyPrice(day, i).toLocaleString('en-IN')"></span></span>
+                                    </template>
+                                    <template x-if="getOccupancyPrice(day, i) === null">
+                                        <span class="text-gray-300">—</span>
+                                    </template>
+                                </td>
+                            </template>
                         </tr>
                     </template>
                 </tbody>
@@ -81,11 +99,30 @@ function inventoryApp() {
     return {
         loading: true,
         roomTypes: [],
-        activeTab: '',
+        activeRoomTab: '',
+        activePlanTab: '',
 
-        get activeInventory() {
-            const rt = this.roomTypes.find(r => r.slug === this.activeTab);
-            return rt ? rt.inventory : [];
+        get activeRoomType() {
+            return this.roomTypes.find(r => r.slug === this.activeRoomTab) || null;
+        },
+
+        get activePlan() {
+            if (!this.activeRoomType) return null;
+            return this.activeRoomType.rate_plans.find(p => p.code === this.activePlanTab) || null;
+        },
+
+        get activeDailyRates() {
+            return this.activePlan?.daily_rates || [];
+        },
+
+        get occupancyColumns() {
+            const maxAdults = this.activeRoomType?.max_adults || 3;
+            return Array.from({ length: maxAdults }, (_, i) => i + 1);
+        },
+
+        getOccupancyPrice(day, occupancy) {
+            const rate = day.occupancy_rates?.find(r => r.occupancy === occupancy);
+            return rate ? rate.price : null;
         },
 
         async fetchInventory() {
@@ -98,7 +135,8 @@ function inventoryApp() {
                 if (data.success) {
                     this.roomTypes = data.data;
                     if (this.roomTypes.length > 0) {
-                        this.activeTab = this.roomTypes[0].slug;
+                        this.activeRoomTab = this.roomTypes[0].slug;
+                        this.activePlanTab = this.roomTypes[0].rate_plans?.[0]?.code || '';
                     }
                 }
             } catch (e) {

@@ -36,7 +36,7 @@ class SearchRequest extends FormRequest
                     }
                 },
             ],
-            'adults' => ['required', 'integer', 'min:1', 'max:3'],
+            'adults' => ['required', 'integer', 'min:1', 'max:4'],
         ];
     }
 
@@ -57,7 +57,7 @@ class SearchRequest extends FormRequest
             'adults.required' => 'Number of adults is required.',
             'adults.integer' => 'Number of adults must be a whole number.',
             'adults.min' => 'At least 1 adult is required.',
-            'adults.max' => 'Guest count cannot exceed 3 adults.',
+            'adults.max' => 'Guest count cannot exceed 4 adults.',
         ];
     }
 }

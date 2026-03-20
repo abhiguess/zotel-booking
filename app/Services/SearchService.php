@@ -3,23 +3,18 @@
 namespace App\Services;
 
 use App\Models\DailyInventory;
+use App\Models\RatePlan;
+use App\Models\RatePlanDailyRate;
 use App\Models\RoomType;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
 class SearchService
 {
-    /** @var array<int, string> */
-    private const PRICE_COLUMN_MAP = [
-        1 => 'price_1p',
-        2 => 'price_2p',
-        3 => 'price_3p',
-    ];
-
     public function __construct(private DiscountService $discountService) {}
 
     /**
-     * @return array{search_params: array, discount: array, room_types: array}
+     * @return array{search_params: array, room_types: array}
      */
     public function search(string $checkIn, string $checkOut, int $adults): array
     {
@@ -27,20 +22,31 @@ class SearchService
         $checkOutDate = Carbon::parse($checkOut);
         $nights = (int) $checkInDate->diffInDays($checkOutDate);
         $daysUntilCheckin = (int) Carbon::today()->diffInDays($checkInDate, false);
-        $priceColumn = self::PRICE_COLUMN_MAP[$adults];
-
-        $discount = $this->discountService->resolveBestDiscount($nights, $daysUntilCheckin);
 
         $roomTypes = RoomType::query()
-            ->with(['dailyInventory' => function ($query) use ($checkInDate, $checkOutDate) {
-                $query->where('date', '>=', $checkInDate->toDateString())
-                    ->where('date', '<', $checkOutDate->toDateString())
-                    ->orderBy('date');
-            }])
+            ->with([
+                'dailyInventory' => function ($query) use ($checkIn, $checkOut) {
+                    $query->where('date', '>=', $checkIn)
+                        ->where('date', '<', $checkOut)
+                        ->orderBy('date');
+                },
+                'ratePlans' => function ($query) {
+                    $query->where('is_active', true)->orderBy('sort_order');
+                },
+                'ratePlans.dailyRates' => function ($query) use ($checkIn, $checkOut, $adults) {
+                    $query->where('date', '>=', $checkIn)
+                        ->where('date', '<', $checkOut)
+                        ->where('occupancy', $adults)
+                        ->orderBy('date');
+                },
+                'ratePlans.discountRules' => function ($query) {
+                    $query->where('is_active', true);
+                },
+            ])
             ->get();
 
-        $roomResults = $roomTypes->map(function (RoomType $roomType) use ($nights, $priceColumn, $discount, $adults) {
-            return $this->buildRoomResult($roomType, $nights, $priceColumn, $discount, $adults);
+        $roomResults = $roomTypes->map(function (RoomType $roomType) use ($nights, $adults, $daysUntilCheckin) {
+            return $this->buildRoomResult($roomType, $nights, $adults, $daysUntilCheckin);
         });
 
         return [
@@ -51,18 +57,15 @@ class SearchService
                 'adults' => $adults,
                 'days_until_checkin' => $daysUntilCheckin,
             ],
-            'discount' => $discount,
             'room_types' => $roomResults->toArray(),
         ];
     }
 
     /**
-     * @return array{id: int, name: string, slug: string, description: string|null, max_adults: int, amenities: array|null, is_available: bool, available_rooms: int, pricing: array|null, nightly_breakdown: array|null}
+     * @return array{id: int, name: string, slug: string, description: string|null, max_adults: int, amenities: array|null, is_available: bool, available_rooms: int, unavailable_reason: string|null, rate_plans: array}
      */
-    private function buildRoomResult(RoomType $roomType, int $nights, string $priceColumn, array $discount, int $adults): array
+    private function buildRoomResult(RoomType $roomType, int $nights, int $adults, int $daysUntilCheckin): array
     {
-        $inventory = $roomType->dailyInventory;
-
         $base = [
             'id' => $roomType->id,
             'name' => $roomType->name,
@@ -72,24 +75,42 @@ class SearchService
             'amenities' => $roomType->amenities,
         ];
 
-        $availability = $this->checkAvailability($inventory, $nights);
+        // Occupancy check
+        if ($adults > $roomType->max_adults) {
+            return array_merge($base, [
+                'is_available' => false,
+                'available_rooms' => 0,
+                'unavailable_reason' => "Exceeds maximum occupancy of {$roomType->max_adults} adults",
+                'rate_plans' => [],
+            ]);
+        }
+
+        // Availability check
+        $availability = $this->checkAvailability($roomType->dailyInventory, $nights);
 
         if (! $availability['is_available']) {
             return array_merge($base, [
                 'is_available' => false,
                 'available_rooms' => 0,
-                'pricing' => null,
-                'nightly_breakdown' => null,
+                'unavailable_reason' => 'Sold Out',
+                'rate_plans' => [],
             ]);
         }
 
-        $pricing = $this->calculatePricing($inventory, $priceColumn, $discount, $adults);
+        // Build rate plan results
+        $ratePlanResults = $roomType->ratePlans
+            ->map(function (RatePlan $ratePlan) use ($nights, $daysUntilCheckin) {
+                return $this->buildRatePlanResult($ratePlan, $nights, $daysUntilCheckin);
+            })
+            ->filter()
+            ->values()
+            ->toArray();
 
         return array_merge($base, [
             'is_available' => true,
             'available_rooms' => $availability['available_rooms'],
-            'pricing' => $pricing['totals'],
-            'nightly_breakdown' => $pricing['breakdown'],
+            'unavailable_reason' => null,
+            'rate_plans' => $ratePlanResults,
         ]);
     }
 
@@ -103,7 +124,7 @@ class SearchService
         }
 
         $hasBlockedOrFull = $inventory->contains(function (DailyInventory $day) {
-            return $day->is_blocked || ($day->total_rooms - $day->booked_rooms) < 1;
+            return $day->is_blocked || $day->available_rooms < 1;
         });
 
         if ($hasBlockedOrFull) {
@@ -111,59 +132,55 @@ class SearchService
         }
 
         $availableRooms = $inventory->min(function (DailyInventory $day) {
-            return $day->total_rooms - $day->booked_rooms;
+            return $day->available_rooms;
         });
 
         return ['is_available' => true, 'available_rooms' => $availableRooms];
     }
 
-    /**
-     * @return array{totals: array{room_only: array, with_breakfast: array}, breakdown: array}
-     */
-    private function calculatePricing(Collection $inventory, string $priceColumn, array $discount, int $adults): array
+    private function buildRatePlanResult(RatePlan $ratePlan, int $nights, int $daysUntilCheckin): ?array
     {
-        $discountPercentage = $discount['percentage'] ?? 0.0;
-        $breakdown = [];
-        $roomOnlyBaseTotal = 0.0;
-        $withBreakfastBaseTotal = 0.0;
+        $dailyRates = $ratePlan->dailyRates;
 
-        foreach ($inventory as $day) {
-            $roomRate = (float) $day->{$priceColumn};
-            $breakfastTotal = round((float) $day->breakfast_price_pp * $adults, 2);
-
-            $breakdown[] = [
-                'date' => $day->date->format('Y-m-d'),
-                'day' => $day->date->format('D'),
-                'room_rate' => $roomRate,
-                'breakfast_total' => $breakfastTotal,
-            ];
-
-            $roomOnlyBaseTotal += $roomRate;
-            $withBreakfastBaseTotal += ($roomRate + $breakfastTotal);
+        // Missing pricing for some dates — rate plan unavailable for this search
+        if ($dailyRates->count() < $nights) {
+            return null;
         }
 
-        $roomOnlyBaseTotal = round($roomOnlyBaseTotal, 2);
-        $withBreakfastBaseTotal = round($withBreakfastBaseTotal, 2);
+        $baseTotal = 0.0;
+        $nightlyBreakdown = [];
 
-        $roomOnlyDiscount = round($roomOnlyBaseTotal * $discountPercentage / 100, 2);
-        $withBreakfastDiscount = round($withBreakfastBaseTotal * $discountPercentage / 100, 2);
+        foreach ($dailyRates as $rate) {
+            /** @var RatePlanDailyRate $rate */
+            $price = (float) $rate->price;
+            $baseTotal += $price;
+
+            $nightlyBreakdown[] = [
+                'date' => $rate->date->format('Y-m-d'),
+                'day' => $rate->date->format('D'),
+                'price' => $price,
+            ];
+        }
+
+        $baseTotal = round($baseTotal, 2);
+
+        $discount = $this->discountService->resolveBestDiscountForRatePlan(
+            $ratePlan->id,
+            $nights,
+            $daysUntilCheckin,
+            $baseTotal,
+        );
+
+        $finalTotal = round($baseTotal - $discount['amount'], 2);
 
         return [
-            'totals' => [
-                'room_only' => [
-                    'base_total' => $roomOnlyBaseTotal,
-                    'discount_percentage' => $discountPercentage,
-                    'discount_amount' => $roomOnlyDiscount,
-                    'final_total' => round($roomOnlyBaseTotal - $roomOnlyDiscount, 2),
-                ],
-                'with_breakfast' => [
-                    'base_total' => $withBreakfastBaseTotal,
-                    'discount_percentage' => $discountPercentage,
-                    'discount_amount' => $withBreakfastDiscount,
-                    'final_total' => round($withBreakfastBaseTotal - $withBreakfastDiscount, 2),
-                ],
-            ],
-            'breakdown' => $breakdown,
+            'id' => $ratePlan->id,
+            'code' => $ratePlan->code,
+            'name' => $ratePlan->name,
+            'base_total' => $baseTotal,
+            'discount' => $discount,
+            'final_total' => $finalTotal,
+            'nightly_breakdown' => $nightlyBreakdown,
         ];
     }
 }

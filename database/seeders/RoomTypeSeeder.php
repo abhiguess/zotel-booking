@@ -22,7 +22,7 @@ class RoomTypeSeeder extends Seeder
                 'name' => 'Deluxe Room',
                 'slug' => 'deluxe',
                 'description' => 'Spacious room with king bed, seating area, and panoramic city views. 36 sqm.',
-                'max_adults' => 3,
+                'max_adults' => 4,
                 'total_rooms' => 5,
                 'amenities' => ['King Bed', 'Seating Area', 'City View', 'Free WiFi', 'Air Conditioning', 'Mini Bar', '36 sqm'],
             ],

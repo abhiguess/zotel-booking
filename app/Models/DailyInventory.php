@@ -12,10 +12,6 @@ class DailyInventory extends Model
     protected $fillable = [
         'room_type_id',
         'date',
-        'price_1p',
-        'price_2p',
-        'price_3p',
-        'breakfast_price_pp',
         'total_rooms',
         'booked_rooms',
         'is_blocked',
@@ -25,10 +21,6 @@ class DailyInventory extends Model
     {
         return [
             'date' => 'date',
-            'price_1p' => 'decimal:2',
-            'price_2p' => 'decimal:2',
-            'price_3p' => 'decimal:2',
-            'breakfast_price_pp' => 'decimal:2',
             'total_rooms' => 'integer',
             'booked_rooms' => 'integer',
             'is_blocked' => 'boolean',
@@ -38,5 +30,15 @@ class DailyInventory extends Model
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class);
+    }
+
+    public function getAvailableRoomsAttribute(): int
+    {
+        return $this->total_rooms - $this->booked_rooms;
+    }
+
+    public function hasAvailability(int $roomsNeeded = 1): bool
+    {
+        return $this->available_rooms >= $roomsNeeded;
     }
 }

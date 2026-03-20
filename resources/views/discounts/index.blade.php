@@ -19,50 +19,33 @@
     </div>
 
     <div x-show="!loading" class="space-y-8">
-        {{-- Long Stay Discounts --}}
+        {{-- Rate Plan Level Discounts --}}
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 class="text-lg font-semibold text-[#1e2a4a] mb-1">Long Stay Discounts</h2>
-            <p class="text-sm text-gray-500 mb-4">Applied when the stay meets minimum night thresholds.</p>
+            <h2 class="text-lg font-semibold text-[#1e2a4a] mb-1">Rate Plan Discounts</h2>
+            <p class="text-sm text-gray-500 mb-4">Discounts applied per rate plan based on booking conditions.</p>
             <div class="space-y-3">
-                <template x-for="rule in longStay" :key="rule.id">
+                <template x-for="rule in rules" :key="rule.id">
                     <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <div class="flex items-center gap-3">
                             <span class="text-sm font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded">
-                                <span x-text="rule.discount_percentage"></span>% OFF
+                                <span x-text="rule.percentage"></span>% OFF
                             </span>
-                            <span class="text-sm text-gray-700">
-                                <span x-text="rule.min_nights"></span>+ nights
-                            </span>
+                            <div>
+                                <p class="text-sm text-gray-700 font-medium" x-text="rule.rate_plan"></p>
+                                <p class="text-xs text-gray-500" x-text="rule.condition"></p>
+                            </div>
                         </div>
-                        <span class="text-xs text-gray-400" x-text="rule.name"></span>
+                        <span class="text-xs font-medium px-2 py-0.5 rounded-full"
+                            :class="{
+                                'bg-blue-100 text-blue-700': rule.type === 'early_bird',
+                                'bg-purple-100 text-purple-700': rule.type === 'long_stay',
+                                'bg-orange-100 text-orange-700': rule.type === 'last_minute',
+                            }"
+                            x-text="rule.type.replace('_', ' ')"></span>
                     </div>
                 </template>
-                <template x-if="longStay.length === 0">
-                    <p class="text-sm text-gray-400">No long stay discounts configured.</p>
-                </template>
-            </div>
-        </div>
-
-        {{-- Last Minute Discounts --}}
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 class="text-lg font-semibold text-[#1e2a4a] mb-1">Last Minute Discounts</h2>
-            <p class="text-sm text-gray-500 mb-4">Applied when check-in is within a specified number of days from today.</p>
-            <div class="space-y-3">
-                <template x-for="rule in lastMinute" :key="rule.id">
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded">
-                                <span x-text="rule.discount_percentage"></span>% OFF
-                            </span>
-                            <span class="text-sm text-gray-700">
-                                Check-in within <span x-text="rule.within_days"></span> days
-                            </span>
-                        </div>
-                        <span class="text-xs text-gray-400" x-text="rule.name"></span>
-                    </div>
-                </template>
-                <template x-if="lastMinute.length === 0">
-                    <p class="text-sm text-gray-400">No last minute discounts configured.</p>
+                <template x-if="rules.length === 0">
+                    <p class="text-sm text-gray-400">No discount rules configured.</p>
                 </template>
             </div>
         </div>
@@ -73,8 +56,7 @@
 function discountApp() {
     return {
         loading: true,
-        longStay: [],
-        lastMinute: [],
+        rules: [],
 
         async fetchDiscounts() {
             try {
@@ -84,8 +66,7 @@ function discountApp() {
                 const data = await response.json();
 
                 if (data.success) {
-                    this.longStay = data.data.long_stay || [];
-                    this.lastMinute = data.data.last_minute || [];
+                    this.rules = data.data.discount_rules || [];
                 }
             } catch (e) {
                 console.error('Failed to load discounts', e);
